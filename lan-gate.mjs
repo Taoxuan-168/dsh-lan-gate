@@ -34,25 +34,47 @@ function stateFile() {
   return path.join(dshHome(), 'lan-gate-state.json')
 }
 
-function loadDecisions() {
+function loadState() {
   try {
     const raw = JSON.parse(fs.readFileSync(stateFile(), 'utf8'))
-    if (raw && typeof raw === 'object' && raw.decisions && typeof raw.decisions === 'object') return raw.decisions
+    return {
+      decisions: raw && typeof raw === 'object' && raw.decisions && typeof raw.decisions === 'object' ? raw.decisions : {},
+      seen: raw && typeof raw === 'object' && raw.seen && typeof raw.seen === 'object' ? raw.seen : {},
+    }
   } catch (_err) {
     // 状态文件不存在或损坏时按空记录处理
   }
-  return {}
+  return { decisions: {}, seen: {} }
 }
 
-function saveDecisions(decisions) {
+function saveState(state) {
   try {
     fs.mkdirSync(dshHome(), { recursive: true })
     const tmp = stateFile() + '.tmp'
-    fs.writeFileSync(tmp, JSON.stringify({ decisions }, null, 2), 'utf8')
+    fs.writeFileSync(tmp, JSON.stringify(state, null, 2), 'utf8')
     fs.renameSync(tmp, stateFile())
   } catch (_err) {
     // 持久化失败不影响运行态
   }
+}
+
+// 设备码：6 位大写字母数字，去掉易混淆的 0/O/1/I，方便口述与抄写
+const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
+
+function randomCode() {
+  let out = ''
+  const bytes = randomBytes(6)
+  for (let i = 0; i < 6; i++) out += CODE_CHARS[bytes[i] % CODE_CHARS.length]
+  return out
+}
+
+function ensureCode(rec) {
+  if (!rec || !rec.code) {
+    const code = randomCode()
+    if (rec) rec.code = code
+    return code
+  }
+  return rec.code
 }
 
 function lanIps() {
@@ -141,6 +163,10 @@ function gatePage(title, body) {
     + '.ip{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:15px;color:#8fa3c8;'
     + 'background:#0b0e14;border:1px solid #232a37;border-radius:10px;padding:10px 16px;'
     + 'display:inline-block;margin:10px 0 4px;word-break:break-all}'
+    + '.code{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:32px;font-weight:700;'
+    + 'letter-spacing:8px;text-indent:8px;color:#fff;background:linear-gradient(135deg,rgba(76,141,255,.16),rgba(122,92,255,.16));'
+    + 'border:1px solid #3a4a6a;border-radius:14px;padding:16px 12px;margin:14px auto 6px;'
+    + 'display:inline-block;min-width:230px;text-align:center;user-select:all}'
     + '.spinner{width:38px;height:38px;margin:20px auto;border-radius:50%;'
     + 'border:3px solid #2a2f3a;border-top-color:#4c8dff;animation:spin .9s linear infinite}'
     + '@keyframes spin{to{transform:rotate(360deg)}}'
@@ -156,25 +182,27 @@ function gatePage(title, body) {
     + '</style></head><body><div class="card">' + body + '</div></body></html>'
 }
 
-function pendingPage(ip) {
+function pendingPage(ip, code) {
   return gatePage('等待本机批准 · DSH 内网访问',
     '<div class="logo">DSH</div>'
     + '<h1>正在等待本机批准</h1>'
     + '<p class="sub">首次访问需要电脑端确认</p>'
     + '<div class="spinner"></div>'
-    + '<p>设备</p><span class="ip">' + ip + '</span>'
-    + '<p>请在电脑上的 DSH 界面批准此设备：<br>设置 → 内网访问 → 允许</p>'
+    + '<p>你的设备码</p>'
+    + '<div class="code">' + code + '</div>'
+    + '<p>请把设备码告诉电脑端管理员，<br>在「设置 → 内网访问」中批准此设备</p>'
+    + '<p class="sub">设备 IP <span class="ip">' + ip + '</span></p>'
     + '<a class="btn" href="javascript:location.reload()">立即检查</a>'
     + '<div class="bar"><i></i></div>'
     + '<script>setTimeout(function(){location.reload()},2500)</script>')
 }
 
-function deniedPage(ip) {
+function deniedPage(ip, code) {
   return gatePage('访问被拒绝 · DSH 内网访问',
     '<div class="logo">DSH</div>'
     + '<h1>访问被拒绝</h1>'
     + '<p class="sub">本机未批准此设备</p>'
-    + '<p class="bad">设备 ' + ip + ' 未被允许访问本机的 DSH。</p>'
+    + '<p class="bad">设备码 ' + (code || '------') + '（' + ip + '）未被允许访问本机的 DSH。</p>'
     + '<p>如需重新允许，请在本机 DSH 的「设置 → 内网访问」页面操作。</p>'
     + '<a class="btn" href="javascript:location.reload()">重新检查</a>'
     + '<script>setTimeout(function(){location.reload()},4000)</script>')
@@ -339,6 +367,9 @@ const PANEL_CSS = '<style>'
   + '.lg-panel .lg-label{font-size:13px;font-weight:600;margin:10px 0 6px;color:var(--dsw-alias-label-primary)}'
   + '.lg-panel .lg-muted{color:var(--dsw-alias-label-secondary);font-size:13px;margin:4px 0}'
   + '.lg-panel .lg-small{font-size:12px}'
+  + '.lg-panel .lg-code{font-family:ui-monospace,Consolas,monospace;font-size:20px;font-weight:700;letter-spacing:3px;color:var(--dsw-alias-brand-primary)}'
+  + '.lg-panel .lg-input{font-size:13px;background:var(--dsw-alias-bg-layer-2);border:1px solid var(--dsw-alias-border-l2);color:var(--dsw-alias-label-primary);border-radius:6px;padding:6px 10px;font-family:ui-monospace,Consolas,monospace;letter-spacing:2px;text-transform:uppercase;width:140px;outline:none}'
+  + '.lg-panel .lg-input:focus{border-color:var(--dsw-alias-brand-primary)}'
   + '.lg-panel .lg-ip{font-family:ui-monospace,Consolas,monospace;font-size:13px;color:var(--dsw-alias-label-primary)}'
   + '.lg-panel .lg-url{font-family:ui-monospace,Consolas,monospace;font-size:13px;color:var(--dsw-alias-label-primary);background:var(--dsw-alias-bg-layer-2);border:1px solid var(--dsw-alias-border-l1);border-radius:6px;padding:6px 10px;margin:4px 0;word-break:break-all;cursor:pointer}'
   + '.lg-panel .lg-item{padding:6px 0;border-bottom:1px solid var(--dsw-alias-border-l1)}'
@@ -350,6 +381,11 @@ const PANEL_CSS = '<style>'
   + '.lg-panel .lg-btn-danger{border-color:var(--dsw-alias-state-error-primary);color:var(--dsw-alias-state-error-primary)}'
   + '.lg-panel .lg-kind-on{border-color:var(--dsw-alias-brand-primary);color:var(--dsw-alias-brand-primary);background:var(--dsw-alias-bg-layer-2)}'
   + '.lg-panel .lg-error{color:var(--dsw-alias-state-error-primary);font-size:13px;margin:4px 0}'
+  + '.lg-panel .lg-cli{font-family:ui-monospace,Consolas,monospace;font-size:12px;color:var(--dsw-alias-label-primary);background:var(--dsw-alias-bg-layer-2);border:1px solid var(--dsw-alias-border-l1);border-radius:6px;padding:7px 10px;margin:3px 0;word-break:break-all;cursor:pointer;white-space:pre-wrap;line-height:1.5}'
+  + '.lg-panel .lg-cli:hover{background:var(--dsw-alias-bg-layer-3,var(--dsw-alias-bg-layer-2))}'
+  + '.lg-panel .lg-cli-note{color:var(--dsw-alias-label-secondary);font-size:12px;margin:2px 0 8px}'
+  + '.lg-panel .lg-my{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--dsw-alias-label-secondary);background:var(--dsw-alias-bg-layer-2);border:1px solid var(--dsw-alias-border-l1);border-radius:8px;padding:7px 10px;margin:8px 0 2px;flex-wrap:wrap}'
+  + '.lg-panel .lg-my b{color:var(--dsw-alias-label-primary);font-family:ui-monospace,Consolas,monospace;font-weight:600}'
   + '.lg-nav-holder{flex:1;min-height:0;overflow-y:auto;padding:0 24px 24px}'
   + '</style>'
 
@@ -364,6 +400,16 @@ const PANEL_JS = '<scr' + 'ipt>'
   + 'var optionsNode=null;'
   + 'var panelNode=null;'
   + 'var cell=null;'
+  + 'var my=null;'
+  + 'function cli(a){return \'dsh-lan \'+a}'
+  + 'function myLabel(m){'
+  + 'var s=m.state;'
+  + 'if(s===\'approved\')return \'已批准\'+(m.kind&&m.kind!==\'auto\'?\'（\'+KIND[m.kind]+\'）\':\'\');'
+  + 'if(s===\'pending\')return \'待批准\';'
+  + 'if(s===\'denied\')return \'已拒绝\';'
+  + 'if(s===\'revoked\')return \'已撤销\';'
+  + 'return \'未登记\';}'
+  + 'function loadMy(){fetch(\'/lan-gate/whoami\').then(function(r){return r.json()}).then(function(d){my=d;if(active)refresh()}).catch(function(){})}'
   + 'function esc(s){return String(s==null?\'\':s).replace(/&/g,\'&amp;\').replace(/</g,\'&lt;\').replace(/>/g,\'&gt;\').replace(/\'/g,\'&#39;\').replace(/"/g,\'&quot;\')}'
   + 'function fmt(ms){return ms?new Date(ms).toLocaleString():\'\'}'
   + 'function kindBtns(cur,act,ip){'
@@ -371,8 +417,8 @@ const PANEL_JS = '<scr' + 'ipt>'
   + 'var ks=[\'auto\',\'phone\',\'desktop\'];'
   + 'for(var i=0;i<ks.length;i++){var k=ks[i];h+=\'<button class="lg-btn\'+(cur===k?\' lg-kind-on\':\'\')+\'" data-act="\'+act+\'" data-kind="\'+k+\'" data-ip="\'+ip+\'">\'+KIND[k]+\'</button>\'}'
   + 'return h}'
-  + 'function post(action,ip,kind){'
-  + 'fetch(\'/lan-gate/action\',{method:\'POST\',headers:{\'Content-Type\':\'application/json\'},body:JSON.stringify({action:action,ip:ip||null,kind:kind||null})})'
+  + 'function post(action,ip,kind,code){'
+  + 'fetch(\'/lan-gate/action\',{method:\'POST\',headers:{\'Content-Type\':\'application/json\'},body:JSON.stringify({action:action,ip:ip||null,kind:kind||null,code:code||null})})'
   + '.then(function(){if(active)refresh()}).catch(function(){})}'
   + 'function refresh(){'
   + 'fetch(\'/lan-gate/status\').then(function(r){return r.json()}).then(render)'
@@ -383,22 +429,32 @@ const PANEL_JS = '<scr' + 'ipt>'
   + 'var h=\'<div class="lg-head"><span class="lg-badge lg-badge-\'+esc(s.state)+\'">\'+(STATE[s.state]||s.state)+\'</span>\';'
   + 'h+=(s.state===\'running\'||s.state===\'starting\')?\'<button class="lg-btn" data-act="stop">停止</button>\':\'<button class="lg-btn lg-btn-primary" data-act="restart">启动 / 重启</button>\';'
   + 'h+=\'</div><div class="lg-muted">端口 \'+esc(s.port)+\' · 转发到 \'+esc(s.target)+\'</div>\';'
+  + 'if(my){h+=\'<div class="lg-my">📡 当前连接 · IP <b>\'+esc(my.ip)+\'</b> · 设备码 <b>\'+esc(my.code||\'------\')+\'</b> · \'+myLabel(my)+\'</div>\'}'
   + 'if(s.state===\'running\'){'
   + 'h+=\'<div class="lg-label">内网访问地址（点击复制）</div>\';'
   + 'for(var i=0;i<(s.urls||[]).length;i++){h+=\'<div class="lg-url" data-copy="\'+esc(s.urls[i])+\'">\'+esc(s.urls[i])+\'</div>\'}}'
   + 'if(s.state===\'error\')h+=\'<div class="lg-error">错误：\'+esc(s.lastError||\'未知\')+\'</div>\';'
+  + 'h+=\'<div class="lg-label">按设备码批准</div>\';'
+  + 'h+=\'<div class="lg-row"><input id="lg-code-input" class="lg-input" placeholder="输入设备码" maxlength="8" autocomplete="off" spellcheck="false"><button class="lg-btn lg-btn-primary" data-act="approve-code" data-kind="auto">允许</button></div>\';'
   + 'if(pending.length){'
   + 'h+=\'<div class="lg-label">待批准设备（先选访问方式再允许）</div>\';'
   + 'for(var j=0;j<pending.length;j++){var p=pending[j];var cur=pendingKinds[p.ip]||\'auto\';'
-  + 'h+=\'<div class="lg-item"><div class="lg-ip">\'+esc(p.ip)+\'</div><div class="lg-muted lg-small">\'+esc(p.ua||\'\')+\'</div><div class="lg-row">\'+kindBtns(cur,\'kind\',p.ip)+\'</div><div class="lg-row"><button class="lg-btn lg-btn-primary" data-act="approve" data-ip="\'+esc(p.ip)+\'">允许</button><button class="lg-btn lg-btn-danger" data-act="deny" data-ip="\'+esc(p.ip)+\'">拒绝</button></div></div>\'}}'
+  + 'h+=\'<div class="lg-item"><div class="lg-code">\'+esc(p.code||\'------\')+\'</div><div class="lg-muted lg-small">设备 IP \'+esc(p.ip)+\' · \'+fmt(p.firstSeen)+\'</div><div class="lg-muted lg-small">\'+esc(p.ua||\'\')+\'</div><div class="lg-row">\'+kindBtns(cur,\'kind\',p.ip)+\'</div><div class="lg-row"><button class="lg-btn lg-btn-primary" data-act="approve" data-ip="\'+esc(p.ip)+\'">允许</button><button class="lg-btn lg-btn-danger" data-act="deny" data-ip="\'+esc(p.ip)+\'">拒绝</button></div></div>\'}}'
   + 'if(approved.length){'
   + 'h+=\'<div class="lg-label">已批准设备（可为每台设备指定访问方式）</div>\';'
   + 'for(var a=0;a<approved.length;a++){var d=approved[a];var dk=d.kind||\'auto\';'
-  + 'h+=\'<div class="lg-item"><div class="lg-ip">\'+esc(d.ip)+\' · \'+(KIND[dk]||\'自动\')+\'</div><div class="lg-muted lg-small">\'+fmt(d.at)+\'</div><div class="lg-row">\'+kindBtns(dk,\'set-kind\',d.ip)+\'</div><div class="lg-row"><button class="lg-btn" data-act="revoke" data-ip="\'+esc(d.ip)+\'">撤销</button></div></div>\'}'
+  + 'h+=\'<div class="lg-item"><div class="lg-code">\'+esc(d.code||\'------\')+\'</div><div class="lg-ip">\'+esc(d.ip)+\' · \'+(KIND[dk]||\'自动\')+\'</div><div class="lg-muted lg-small">\'+fmt(d.at)+\'</div><div class="lg-row">\'+kindBtns(dk,\'set-kind\',d.ip)+\'</div><div class="lg-row"><button class="lg-btn" data-act="revoke" data-ip="\'+esc(d.ip)+\'">撤销</button></div></div>\'}'
   + 'h+=\'<div class="lg-row"><button class="lg-btn lg-btn-danger" data-act="revoke-all">全部撤销</button></div>\'}'
   + 'if(denied.length){'
   + 'h+=\'<div class="lg-label">已拒绝设备</div>\';'
-  + 'for(var b=0;b<denied.length;b++){var dn=denied[b];h+=\'<div class="lg-item"><div class="lg-ip">\'+esc(dn.ip)+\'</div><div class="lg-row"><button class="lg-btn lg-btn-primary" data-act="approve" data-ip="\'+esc(dn.ip)+\'">重新允许</button></div></div>\'}}'
+  + 'for(var b=0;b<denied.length;b++){var dn=denied[b];h+=\'<div class="lg-item"><div class="lg-code">\'+esc(dn.code||\'------\')+\'</div><div class="lg-ip">\'+esc(dn.ip)+\'</div><div class="lg-row"><button class="lg-btn lg-btn-primary" data-act="approve" data-ip="\'+esc(dn.ip)+\'">重新允许</button><button class="lg-btn lg-btn-danger" data-act="clear" data-ip="\'+esc(dn.ip)+\'">清除</button></div></div>\'}}'
+  + 'h+=\'<div class="lg-label">💻 命令行允许设备（在电脑终端执行，点击命令复制）</div>\';'
+  + 'h+=\'<div class="lg-cli" data-copy="\'+esc(cli(\'status\'))+\'">\'+esc(cli(\'status\'))+\'</div>\';'
+  + 'h+=\'<div class="lg-cli" data-copy="\'+esc(cli(\'approve <设备码>\'))+\'">\'+esc(cli(\'approve <设备码>\'))+\'</div>\';'
+  + 'h+=\'<div class="lg-cli" data-copy="\'+esc(cli(\'approve-ip <IP>\'))+\'">\'+esc(cli(\'approve-ip <IP>\'))+\'</div>\';'
+  + 'h+=\'<div class="lg-cli" data-copy="\'+esc(cli(\'revoke <设备码|IP>\'))+\'">\'+esc(cli(\'revoke <设备码|IP>\'))+\'</div>\';'
+  + 'h+=\'<div class="lg-cli" data-copy="\'+esc(cli(\'stop\'))+\'">\'+esc(cli(\'stop\'))+\'</div>\';'
+  + 'h+=\'<div class="lg-cli-note">先执行 status 查看待批准设备的设备码；deny（拒绝）、start（重新开启）命令同样可用。</div>\';'
   + 'h+=\'<div class="lg-muted">说明：只有已批准设备的请求才会转发到本机 DSH；修改访问方式后该设备刷新页面即生效。</div>\';'
   + 'panelNode.innerHTML=\'<div class="lg-panel">\'+h+\'</div>\'}'
   + 'function startPoll(){stopPoll();timer=setInterval(function(){if(active)refresh()},2000)}'
@@ -437,11 +493,16 @@ const PANEL_JS = '<scr' + 'ipt>'
   + 'if(!act)return;'
   + 'var ip=el.getAttribute(\'data-ip\');'
   + 'var kind=el.getAttribute(\'data-kind\');'
+  + 'var codeInput=document.getElementById(\'lg-code-input\');'
+  + 'var code=codeInput?codeInput.value:\'\';'
   + 'if(act===\'kind\'){pendingKinds[ip]=kind;refresh();return}'
+  + 'if(act===\'approve-code\'){post(\'approve-code\',null,kind||\'auto\',code);if(codeInput)codeInput.value=\'\';return}'
+  + 'if(act===\'deny-code\'){post(\'deny-code\',null,null,code);if(codeInput)codeInput.value=\'\';return}'
   + 'if(act===\'approve\'){post(\'approve\',ip,pendingKinds[ip]||\'auto\');return}'
   + 'if(act===\'deny\'){post(\'deny\',ip);return}'
   + 'if(act===\'set-kind\'){post(\'set-kind\',ip,kind);return}'
   + 'if(act===\'revoke\'){post(\'revoke\',ip);return}'
+  + 'if(act===\'clear\'){post(\'clear\',ip);return}'
   + 'if(act===\'revoke-all\'){post(\'revoke-all\');return}'
   + 'if(act===\'stop\'){post(\'stop\');return}'
   + 'if(act===\'restart\'){post(\'restart\');return}'
@@ -458,6 +519,7 @@ const PANEL_JS = '<scr' + 'ipt>'
   + 'if(panelNode)panelNode.style.display=\'block\';'
   + 'styleActive();'
   + 'refresh();'
+  + 'loadMy();'
   + 'startPoll()});'
   + 'list.appendChild(cell);'
   + 'list.addEventListener(\'click\',function(ev){'
@@ -500,6 +562,13 @@ function isLocalRequest(req) {
   return lanIps().indexOf(first) >= 0
 }
 
+// 当前请求的真实来源 IP：经 3088 代理时取 x-forwarded-for，否则取 socket 地址
+function requestIp(req) {
+  const xff = req.headers['x-forwarded-for']
+  if (typeof xff === 'string' && xff !== '') return xff.split(',')[0].trim()
+  return normalizeIp(req.socket.remoteAddress)
+}
+
 function json(res, code, value) {
   res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' })
   res.end(JSON.stringify(value))
@@ -509,33 +578,51 @@ function json(res, code, value) {
 
 export function apply(ctx) {
   const webServer = ctx.webServer
-  const decisions = loadDecisions()
-  const seen = {}
+  const state = loadState()
+  const decisions = state.decisions
+  const seen = state.seen
   const live = new Map()
   const rateMap = new Map()
 
   let server = null
   let running = false
-  let userStopped = false
+  // 默认不自动开启内网访问：userStopped=true 表示"停止/未启动"状态，
+  // 需要用户在面板点「启动 / 重启」或命令行执行 start 手动开启
+  let userStopped = true
   let lastError = ''
   let starting = false
 
   function save() {
-    saveDecisions(decisions)
+    saveState({ decisions, seen })
+  }
+
+  function findIpByCode(code) {
+    const want = String(code || '').trim().toUpperCase()
+    if (!want) return undefined
+    for (const ip of Object.keys(seen)) {
+      if (seen[ip] && String(seen[ip].code || '').toUpperCase() === want) return ip
+    }
+    for (const ip of Object.keys(decisions)) {
+      if (decisions[ip] && String(decisions[ip].code || '').toUpperCase() === want) return ip
+    }
+    return undefined
   }
 
   function decide(ip, allow, kind) {
     const prev = decisions[ip]
-    const nextKind = kind === 'phone' || kind === 'desktop'
-      ? kind
-      : (prev && (prev.kind === 'phone' || prev.kind === 'desktop') ? prev.kind : 'auto')
-    decisions[ip] = { ip: ip, allow: allow, at: Date.now(), revoked: false, kind: nextKind, token: randomToken(), issued: false }
+    let nextKind
+    if (kind === 'phone' || kind === 'desktop') nextKind = kind
+    else if (kind === 'auto') nextKind = 'auto'
+    else nextKind = (prev && (prev.kind === 'phone' || prev.kind === 'desktop') ? prev.kind : 'auto')
+    const code = (prev && prev.code) || ensureCode(seen[ip])
+    if (!seen[ip]) seen[ip] = { firstSeen: Date.now(), ua: '', code: code }
+    decisions[ip] = { ip: ip, allow: allow, at: Date.now(), revoked: false, kind: nextKind, token: randomToken(), issued: false, code: code }
     save()
   }
 
   function revokeIp(ip) {
     const prev = decisions[ip]
-    decisions[ip] = { ip: ip, allow: prev ? prev.allow === true : true, at: Date.now(), revoked: true, kind: prev && prev.kind ? prev.kind : 'auto' }
+    decisions[ip] = { ip: ip, allow: prev ? prev.allow === true : true, at: Date.now(), revoked: true, kind: prev && prev.kind ? prev.kind : 'auto', code: (prev && prev.code) || (seen[ip] && seen[ip].code) || undefined }
     save()
   }
 
@@ -546,13 +633,13 @@ export function apply(ctx) {
     for (const ip of Object.keys(decisions)) {
       const d = decisions[ip]
       if (d.revoked === true) continue
-      if (d.allow === true) approved.push({ ip: ip, at: d.at, kind: d.kind || 'auto' })
-      else if (d.allow === false) denied.push({ ip: ip, at: d.at })
+      if (d.allow === true) approved.push({ ip: ip, at: d.at, kind: d.kind || 'auto', code: d.code || (seen[ip] && seen[ip].code) || null })
+      else if (d.allow === false) denied.push({ ip: ip, at: d.at, code: d.code || (seen[ip] && seen[ip].code) || null })
     }
     for (const ip of Object.keys(seen)) {
       const d = decisions[ip]
       if (d && d.revoked !== true) continue
-      pending.push({ ip: ip, firstSeen: seen[ip].firstSeen, ua: seen[ip].ua })
+      pending.push({ ip: ip, firstSeen: seen[ip].firstSeen, ua: seen[ip].ua, code: seen[ip].code || null })
     }
     const ips = lanIps()
     return {
@@ -572,6 +659,24 @@ export function apply(ctx) {
     json(res, 200, buildStatus())
   }
 
+  // 当前连接信息：请求来源 IP + 关联设备码 + 批准状态（供管理面板显示"当前浏览器"）
+  function whoamiHandler(req, res) {
+    if (!isLocalRequest(req)) { json(res, 403, { ok: false, reason: 'forbidden' }); return }
+    const ip = requestIp(req)
+    const d = decisions[ip]
+    const s = seen[ip]
+    const state = d
+      ? (d.revoked === true ? 'revoked' : d.allow === true ? 'approved' : 'denied')
+      : (s ? 'pending' : 'unknown')
+    json(res, 200, {
+      ip: ip,
+      code: (d && d.code) || (s && s.code) || null,
+      kind: (d && d.kind) || 'auto',
+      state: state,
+      viaProxy: typeof req.headers['x-forwarded-for'] === 'string' && req.headers['x-forwarded-for'] !== '',
+    })
+  }
+
   function actionHandler(req, res) {
     if (!isLocalRequest(req)) { json(res, 403, { ok: false, reason: 'forbidden' }); return }
     if (req.method !== 'POST') { json(res, 405, { ok: false, reason: 'post-only' }); return }
@@ -586,12 +691,32 @@ export function apply(ctx) {
       const action = String(body.action || '')
       const ip = String(body.ip || '')
       const kind = String(body.kind || '')
+      const code = String(body.code || '')
       if (action === 'approve') decide(ip, true, kind)
       else if (action === 'deny') decide(ip, false, 'auto')
       else if (action === 'set-kind') { if (decisions[ip] && decisions[ip].allow === true && decisions[ip].revoked !== true) decide(ip, true, kind) }
       else if (action === 'revoke') revokeIp(ip)
       else if (action === 'revoke-all') { for (const key of Object.keys(decisions)) revokeIp(key) }
-      else if (action === 'stop') {
+      else if (action === 'approve-code') {
+        const found = findIpByCode(code)
+        if (!found) { json(res, 404, { ok: false, reason: 'code-not-found' }); return }
+        decide(found, true, kind)
+      } else if (action === 'deny-code') {
+        const found = findIpByCode(code)
+        if (!found) { json(res, 404, { ok: false, reason: 'code-not-found' }); return }
+        decide(found, false, 'auto')
+      } else if (action === 'revoke-code') {
+        const found = findIpByCode(code)
+        if (!found) { json(res, 404, { ok: false, reason: 'code-not-found' }); return }
+        revokeIp(found)
+      } else if (action === 'clear' || action === 'remove') {
+        // 彻底清除设备记录（decisions + seen），设备完全不可见，下次访问视为全新设备
+        const targetIp = ip || findIpByCode(code)
+        if (!targetIp) { json(res, 404, { ok: false, reason: 'code-not-found' }); return }
+        delete decisions[targetIp]
+        delete seen[targetIp]
+        save()
+      } else if (action === 'stop') {
         userStopped = true
         if (server) { try { server.close() } catch (_err) { /* 已关闭 */ } server = null }
         running = false
@@ -618,13 +743,20 @@ export function apply(ctx) {
     if (server || userStopped) return
     starting = true
     const proxy = http.createServer((req, res) => {
-      const ip = normalizeIp(req.socket.remoteAddress)
+      const rawIp = normalizeIp(req.socket.remoteAddress)
+      // 内网穿透 / 前置代理转发的请求会带 x-forwarded-for（真实客户端 IP）。
+      // 此时即使 socket 来源是本机（如 frp/隧道在本机回环），也按真实 IP 走门禁逻辑，
+      // 否则广域网设备会被当作本机直接放行，且共享 127.0.0.1 的限流桶导致频繁 429。
+      const xff = req.headers['x-forwarded-for']
+      const viaProxy = typeof xff === 'string' && xff !== ''
+      const ip = viaProxy ? xff.split(',')[0].trim() : rawIp
       if (overRate(ip)) {
         res.writeHead(429, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'Retry-After': '60' })
         res.end(rateLimitPage(ip))
         return
       }
-      if (isLoopbackIp(ip) || lanIps().indexOf(ip) >= 0) {
+      // 仅当来源是本机且没有 XFF 时，才视为本机直接访问，直接放行
+      if (!viaProxy && (isLoopbackIp(rawIp) || lanIps().indexOf(rawIp) >= 0)) {
         forwardRequest(decisions, req, res, ip)
         return
       }
@@ -652,23 +784,29 @@ export function apply(ctx) {
         res.end('')
         return
       }
-      if (!seen[ip]) seen[ip] = { firstSeen: Date.now(), ua: String(req.headers['user-agent'] || '').slice(0, 160) }
+      const isNewDevice = !seen[ip]
+      if (isNewDevice) seen[ip] = { firstSeen: Date.now(), ua: String(req.headers['user-agent'] || '').slice(0, 160), code: randomCode() }
+      else { seen[ip].ua = String(req.headers['user-agent'] || '').slice(0, 160) || seen[ip].ua }
       if (d && d.allow === false && d.revoked !== true) {
         res.writeHead(403, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' })
-        res.end(deniedPage(ip))
+        res.end(deniedPage(ip, seen[ip].code))
         return
       }
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' })
-      res.end(pendingPage(ip))
+      res.end(pendingPage(ip, seen[ip].code))
+      if (isNewDevice) save()
     })
     proxy.on('upgrade', (req, socket, head) => {
-      const ip = normalizeIp(socket.remoteAddress)
+      const rawIp = normalizeIp(socket.remoteAddress)
+      const xff = req.headers['x-forwarded-for']
+      const viaProxy = typeof xff === 'string' && xff !== ''
+      const ip = viaProxy ? xff.split(',')[0].trim() : rawIp
       if (overRate(ip)) {
         try { socket.end('HTTP/1.1 429 Too Many Requests\r\nConnection: close\r\n\r\n') } catch (_err) { /* 已关闭 */ }
         return
       }
       const d = decisions[ip]
-      const ok = isLoopbackIp(ip) || lanIps().indexOf(ip) >= 0
+      const ok = (!viaProxy && (isLoopbackIp(rawIp) || lanIps().indexOf(rawIp) >= 0))
         || (d !== undefined && d.allow === true && d.revoked !== true && d.token !== undefined && parseCookies(req).lg_token === d.token)
       if (!ok) {
         try { socket.end('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n') } catch (_err) { /* 已关闭 */ }
@@ -728,6 +866,7 @@ export function apply(ctx) {
   }
 
   ctx.effect(() => webServer.register({ kind: 'exact', path: '/lan-gate/status', handler: statusHandler }), 'lan-gate: status route')
+  ctx.effect(() => webServer.register({ kind: 'exact', path: '/lan-gate/whoami', handler: whoamiHandler }), 'lan-gate: whoami route')
   ctx.effect(() => webServer.register({ kind: 'exact', path: '/lan-gate/action', handler: actionHandler }), 'lan-gate: action route')
   ctx.effect(() => webServer.tapIndex(injectPanel), 'lan-gate: index injection')
 
@@ -744,7 +883,7 @@ export function apply(ctx) {
   }, 3000)
 
   ctx.effect(() => {
-    startProxy()
+    // 默认不自动开启内网访问：由用户在面板点「启动 / 重启」或命令行执行 start 手动开启
     return () => {
       clearInterval(sweep)
       userStopped = true
@@ -753,4 +892,172 @@ export function apply(ctx) {
       if (s) { try { s.close() } catch (_err) { /* 已关闭 */ } }
     }
   })
+}
+
+// ---- 命令行工具（管理员可直接用命令行批准/拒绝/撤销设备） ----
+// 用法：
+//   node lan-gate.mjs status                                # 查看状态（含待批准设备码）
+//   node lan-gate.mjs approve <设备码> [auto|phone|desktop] # 按设备码批准设备
+//   node lan-gate.mjs approve-ip <IP> [auto|phone|desktop]  # 按 IP 批准设备
+//   node lan-gate.mjs deny <设备码|IP>                      # 拒绝设备（自动识别码或 IP）
+//   node lan-gate.mjs revoke <设备码|IP>                    # 撤销已批准设备（自动识别码或 IP）
+// CLI 通过本机 127.0.0.1:<TARGET_PORT> 的管理接口操作运行中的插件，改完立即生效，无需重启。
+
+function cliHttp(method, path, body) {
+  return new Promise((resolve, reject) => {
+    const payload = body ? JSON.stringify(body) : null
+    const req = http.request({
+      host: '127.0.0.1',
+      port: TARGET_PORT,
+      path: path,
+      method: method,
+      timeout: 5000,
+      headers: payload ? { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) } : {},
+    }, (res) => {
+      const chunks = []
+      res.on('data', (c) => chunks.push(c))
+      res.on('end', () => {
+        const text = Buffer.concat(chunks).toString('utf8')
+        let data = null
+        try { data = JSON.parse(text) } catch (_e) { /* 非 JSON */ }
+        resolve({ status: res.statusCode, data: data, text: text })
+      })
+    })
+    req.on('error', reject)
+    req.on('timeout', () => { req.destroy(new Error('请求超时')) })
+    if (payload) req.write(payload)
+    req.end()
+  })
+}
+
+function isIpLike(v) {
+  return /^[0-9a-fA-F:.]+$/.test(v) && (v.indexOf('.') >= 0 || v.indexOf(':') >= 0)
+}
+
+const KIND_ZH = { auto: '自动', phone: '手机', desktop: '电脑' }
+
+function fmtTime(ms) {
+  return ms ? new Date(ms).toLocaleString() : ''
+}
+
+function printCliHelp(bin) {
+  console.log('')
+  console.log('全部可用命令:')
+  console.log('  ' + bin + ' status                                # 查看状态与待批准设备码')
+  console.log('  ' + bin + ' approve <设备码> [auto|phone|desktop]  # 按设备码允许设备')
+  console.log('  ' + bin + ' approve-ip <IP> [auto|phone|desktop]   # 按 IP 允许设备')
+  console.log('  ' + bin + ' deny <设备码|IP>                       # 拒绝设备（自动识别码或 IP）')
+  console.log('  ' + bin + ' revoke <设备码|IP>                     # 撤销已批准设备（自动识别码或 IP）')
+  console.log('  ' + bin + ' clear <设备码|IP>                      # 清除设备记录，使其完全不可见')
+  console.log('  ' + bin + ' stop                                    # 停止内网访问（关闭 3088 端口）')
+  console.log('  ' + bin + ' start                                   # 重新开启内网访问')
+}
+
+async function cliMain(argv) {
+  const cmd = String(argv[0] || '').toLowerCase()
+  // 短命令名（已安装 /usr/local/bin/dsh-lan 包装脚本）；未安装时也可用完整路径执行本文件
+  const bin = 'dsh-lan'
+  try {
+    if (cmd === 'status' || cmd === 'pending' || cmd === 'list') {
+      const r = await cliHttp('GET', '/lan-gate/status')
+      const s = r.data
+      if (!s || typeof s !== 'object') {
+        console.error('无法读取状态（HTTP ' + r.status + '）：' + r.text)
+        process.exitCode = 1
+        return
+      }
+      console.log('=== DSH 内网访问网关 ===')
+      const stateZh = s.state === 'running' ? '运行中' : s.state === 'stopped' ? '已停止（默认不自动开启）' : s.state === 'starting' ? '启动中' : s.state === 'error' ? '出错' : s.state
+      console.log('状态: ' + stateZh + '   端口: ' + s.port + '   转发到: ' + s.target)
+      if (s.state !== 'running') {
+        console.log('提示: 内网访问当前未开启，可用 `' + bin + ' start` 开启（或在 DSH 设置 → 内网访问 面板点「启动 / 重启」）')
+      }
+      if (s.urls && s.urls.length) {
+        console.log('访问地址:')
+        for (const u of s.urls) console.log('  ' + u)
+      }
+      if (s.lastError) console.log('错误: ' + s.lastError)
+      console.log('')
+      if (s.pending && s.pending.length) {
+        console.log('待批准设备:')
+        for (const p of s.pending) {
+          console.log('  设备码  ' + (p.code || '------') + '   IP ' + p.ip + '   首次 ' + fmtTime(p.firstSeen))
+          if (p.ua) console.log('          ' + p.ua)
+        }
+      } else {
+        console.log('待批准设备: （无）')
+      }
+      if (s.approved && s.approved.length) {
+        console.log('')
+        console.log('已批准设备:')
+        for (const d of s.approved) {
+          console.log('  设备码  ' + (d.code || '------') + '   IP ' + d.ip + '   方式 ' + (KIND_ZH[d.kind] || '自动') + '   批准于 ' + fmtTime(d.at))
+        }
+      }
+      if (s.denied && s.denied.length) {
+        console.log('')
+        console.log('已拒绝设备:')
+        for (const d of s.denied) {
+          console.log('  设备码  ' + (d.code || '------') + '   IP ' + d.ip + '   拒绝于 ' + fmtTime(d.at))
+        }
+      }
+      console.log('')
+      printCliHelp(bin)
+      return
+    }
+    if (cmd === 'approve' || cmd === 'approve-ip' || cmd === 'deny' || cmd === 'revoke' || cmd === 'clear') {
+      const target = String(argv[1] || '').trim()
+      if (!target) {
+        console.error('用法: node lan-gate.mjs ' + cmd + ' <设备码|IP> [auto|phone|desktop]')
+        process.exitCode = 1
+        return
+      }
+      let action, code, ip
+      if (cmd === 'approve-ip') { action = 'approve'; ip = target }
+      else if (cmd === 'approve') { action = 'approve-code'; code = target }
+      else if (cmd === 'deny') {
+        if (isIpLike(target)) { action = 'deny'; ip = target } else { action = 'deny-code'; code = target }
+      } else if (cmd === 'clear') {
+        // 彻底清除设备记录：设备完全不可见，下次访问视为全新设备
+        if (isIpLike(target)) { action = 'clear'; ip = target } else { action = 'clear'; code = target }
+      } else {
+        if (isIpLike(target)) { action = 'revoke'; ip = target } else { action = 'revoke-code'; code = target }
+      }
+      const kind = String(argv[2] || 'auto').trim()
+      const r = await cliHttp('POST', '/lan-gate/action', { action: action, ip: ip || null, code: code || null, kind: kind })
+      if (r.status === 200 && r.data && r.data.ok) {
+        const what = cmd === 'approve' || cmd === 'approve-ip' ? '已允许设备' : cmd === 'deny' ? '已拒绝设备' : cmd === 'clear' ? '已清除设备（记录已删除）' : '已撤销设备'
+        const extra = (cmd === 'approve' || cmd === 'approve-ip') && kind && kind !== 'auto' ? '（访问方式: ' + (KIND_ZH[kind] || kind) + '）' : ''
+        console.log('OK: ' + what + ' ' + target + extra)
+      } else {
+        console.error('失败（HTTP ' + r.status + '）: ' + (r.data && (r.data.reason || r.data.error) ? (r.data.reason || r.data.error) : (r.text || '未知错误')))
+        if (r.status === 404) console.error('提示: 未找到该设备码，可用 `' + bin + ' status` 查看待批准设备的设备码')
+        process.exitCode = 1
+      }
+      return
+    }
+    if (cmd === 'stop' || cmd === 'start' || cmd === 'restart') {
+      const action = cmd === 'stop' ? 'stop' : 'restart'
+      const r = await cliHttp('POST', '/lan-gate/action', { action: action })
+      if (r.status === 200 && r.data && r.data.ok) {
+        console.log('OK: 已' + (cmd === 'stop' ? '停止内网访问（3088 端口已关闭）' : '启动内网访问（3088 端口已开启）'))
+      } else {
+        console.error('失败（HTTP ' + r.status + '）: ' + (r.data && (r.data.reason || r.data.error) ? (r.data.reason || r.data.error) : (r.text || '未知错误')))
+        process.exitCode = 1
+      }
+      return
+    }
+    printCliHelp(bin)
+    process.exitCode = 1
+  } catch (err) {
+    console.error('连接失败: ' + (err && err.message ? err.message : err))
+    console.error('提示: 请确认 DSH 正在运行（管理接口位于 127.0.0.1:' + TARGET_PORT + '）')
+    process.exitCode = 1
+  }
+}
+
+// 直接以 `node lan-gate.mjs <命令>` 运行时进入 CLI 模式；
+// 被 DSH 插件加载器 import 时 process.argv[1] 是 dsh 入口，不会触发。
+if (process.argv[1] && import.meta.filename && process.argv[1] === import.meta.filename) {
+  cliMain(process.argv.slice(2))
 }
