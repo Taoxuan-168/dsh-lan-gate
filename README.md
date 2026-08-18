@@ -190,9 +190,6 @@ node lan-gate.mjs start                                 # 重新开启内网访�
 - DeepSeek Harness（run-from-source 的 web profile）
 - Node ≥ 18（仅使用内置模块）
 - 现代浏览器（Chrome / Safari / Firefox / 微信内置浏览器）
-## 插件有问题欢迎联系我
-QQ:3405822503
-(请备注好)
 
 ## License
 
