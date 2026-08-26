@@ -22,7 +22,7 @@ const PROXY_PORT = Number(process.env.LAN_GATE_PORT || 3088)
 // 使用前置反向代理/隧道时建议改为 '127.0.0.1'（也可用环境变量覆盖）
 const LISTEN_HOST = process.env.LAN_GATE_HOST || '0.0.0.0'
 // 每 IP 每分钟请求上限（滑动窗口），超限返回 429
-const RATE_LIMIT_PER_MIN = 120
+const RATE_LIMIT_PER_MIN = 1000
 const TARGET_HOST = '127.0.0.1'
 const TARGET_PORT = 3080
 
@@ -457,7 +457,7 @@ const PANEL_JS = '<scr' + 'ipt>'
   + 'h+=\'<div class="lg-cli-note">先执行 status 查看待批准设备的设备码；deny（拒绝）、start（重新开启）命令同样可用。</div>\';'
   + 'h+=\'<div class="lg-muted">说明：只有已批准设备的请求才会转发到本机 DSH；修改访问方式后该设备刷新页面即生效。</div>\';'
   + 'panelNode.innerHTML=\'<div class="lg-panel">\'+h+\'</div>\'}'
-  + 'function startPoll(){stopPoll();timer=setInterval(function(){if(active)refresh()},2000)}'
+  + 'function startPoll(){stopPoll();timer=setInterval(function(){if(active)refresh()},5000)}'
   + 'function stopPoll(){if(timer){clearInterval(timer);timer=null}}'
   + 'function styleActive(){'
   + 'var all=document.querySelectorAll(\'.lg-nav-cell\');'
